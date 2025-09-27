@@ -100,6 +100,17 @@ If you hit a bug or want a feature, open an issue.
 
 ---
 
+## 🚨 Changelog / Known Issues
+
+- [ ] **Error analyzing git changes:** `failed to get git diff: exit status 128` (occurs if repo is new, not initialized, or git range is invalid).
+- [ ] **Test generator sometimes adds package name to functions in the same directory.**
+- [ ] **Can't generate tests for a function unless there are git changes.** (Should allow generating tests for any function/file, regardless of git.)
+- [ ] **Test rewriting logic:** If a function's test exists, should update/overwrite it; else, append new test to the file.
+- [ ] **Prompt sometimes generates buggy tests, one-liners, or low-quality output.**
+- [ ] **No automatic changelog/issue tracker for bugs or testgen findings.** (Consider adding a `testgen changelog` or `testgen issues` command.)
+- [ ] **CLI error handling:** Some errors are cryptic or unclear; improve user-facing messages.
+
 **License:** _TBD_
 
 **Author:** [Eranmonnie](https://github.com/Eranmonnie)
+
