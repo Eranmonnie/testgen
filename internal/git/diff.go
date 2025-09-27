@@ -68,21 +68,39 @@ func GetChangedFiles(from, to string) ([]string, error) {
 	return files, nil
 }
 
-// parseDiff parses the raw git diff output
+// Add this helper method to better detect function modifications
+func (fd *FileDiff) addFunctionIfModified(functionName string) {
+	if functionName == "" {
+		return
+	}
+
+	// Check if function already exists
+	for _, existing := range fd.Functions {
+		if existing == functionName {
+			return
+		}
+	}
+
+	// Add the function
+	fd.Functions = append(fd.Functions, functionName)
+}
+
+// Update the parseDiff function to better handle function detection
 func parseDiff(diffText string) (*DiffResult, error) {
 	result := &DiffResult{}
 	scanner := bufio.NewScanner(strings.NewReader(diffText))
-	
+
 	var currentFile *FileDiff
 	var currentFunction string
-	
+	var lineNum int
+
 	// Regex patterns for parsing
 	fileHeaderRegex := regexp.MustCompile(`^diff --git a/(.*) b/(.*)$`)
 	hunkHeaderRegex := regexp.MustCompile(`^@@ -(\d+),?(\d*) \+(\d+),?(\d*) @@ ?(.*)$`)
-	
+
 	for scanner.Scan() {
 		line := scanner.Text()
-		
+
 		// New file diff
 		if matches := fileHeaderRegex.FindStringSubmatch(line); matches != nil {
 			if currentFile != nil {
@@ -92,65 +110,127 @@ func parseDiff(diffText string) (*DiffResult, error) {
 				OldPath: matches[1],
 				NewPath: matches[2],
 			}
+			lineNum = 0
+			currentFunction = ""
 			continue
 		}
-		
+
 		// Hunk header (contains function context)
 		if matches := hunkHeaderRegex.FindStringSubmatch(line); matches != nil {
 			if len(matches) > 5 && matches[5] != "" {
 				// Extract function name from context
 				funcContext := matches[5]
-				currentFunction = extractFunctionName(funcContext)
-				if currentFunction != "" && currentFile != nil {
-					// Add to functions list if not already there
-					found := false
-					for _, f := range currentFile.Functions {
-						if f == currentFunction {
-							found = true
-							break
-						}
-					}
-					if !found {
-						currentFile.Functions = append(currentFile.Functions, currentFunction)
+				if extractedFunc := extractFunctionName(funcContext); extractedFunc != "" {
+					currentFunction = extractedFunc
+					if currentFile != nil {
+						currentFile.addFunctionIfModified(currentFunction)
 					}
 				}
 			}
+			lineNum = 0
 			continue
 		}
-		
+
 		// Skip file metadata lines
-		if strings.HasPrefix(line, "index ") || 
-		   strings.HasPrefix(line, "--- ") || 
-		   strings.HasPrefix(line, "+++ ") {
+		if strings.HasPrefix(line, "index ") ||
+			strings.HasPrefix(line, "--- ") ||
+			strings.HasPrefix(line, "+++ ") {
 			continue
 		}
-		
+
 		// Parse actual diff content
 		if currentFile != nil {
 			change := parseDiffLine(line, currentFunction)
 			if change != nil {
+				change.LineNum = lineNum
 				currentFile.Changes = append(currentFile.Changes, *change)
+
+				// If this line defines a new function, update our tracking
+				if (change.Type == Added || change.Type == Context) && strings.Contains(change.Line, "func ") {
+					if funcName := extractFunctionName(change.Line); funcName != "" {
+						currentFile.addFunctionIfModified(funcName)
+						currentFunction = funcName
+					}
+				}
 			}
+			lineNum++
 		}
 	}
-	
+
 	// Don't forget the last file
 	if currentFile != nil {
 		result.Files = append(result.Files, *currentFile)
 	}
-	
+
 	return result, nil
 }
 
-// extractFunctionName extracts function name from hunk context
-func extractFunctionName(context string) string {
-	// Go function pattern: "func FunctionName(" or "func (receiver) FunctionName("
-	funcRegex := regexp.MustCompile(`func\s+(?:\([^)]*\)\s+)?(\w+)\s*\(`)
-	matches := funcRegex.FindStringSubmatch(context)
-	if len(matches) > 1 {
-		return matches[1]
+// GetModifiedFunctions extracts function names that were actually modified
+func (fd FileDiff) GetModifiedFunctions() []string {
+	// Track which functions have actual changes (not just context)
+	functionsWithChanges := make(map[string]bool)
+
+	for _, change := range fd.Changes {
+		// Only count functions that have additions or removals
+		if change.Type == Added || change.Type == Removed {
+			if change.Function != "" {
+				functionsWithChanges[change.Function] = true
+			}
+		}
 	}
-	return ""
+
+	// Convert map to slice
+	var result []string
+	for funcName := range functionsWithChanges {
+		result = append(result, funcName)
+	}
+
+	return result
+}
+
+// extractFunctionName extracts function name from a function declaration line or context
+func extractFunctionName(line string) string {
+	// Clean up the line
+	line = strings.TrimSpace(line)
+
+	// Handle context lines that might have extra characters
+	if strings.HasPrefix(line, "+") || strings.HasPrefix(line, "-") || strings.HasPrefix(line, " ") {
+		line = strings.TrimSpace(line[1:])
+	}
+
+	// Must start with "func " to be a function declaration
+	if !strings.HasPrefix(line, "func ") {
+		return ""
+	}
+
+	// Remove "func " prefix
+	line = strings.TrimPrefix(line, "func ")
+	line = strings.TrimSpace(line)
+
+	// Handle method declarations: (receiver) FunctionName(
+	if strings.HasPrefix(line, "(") {
+		// Find the closing parenthesis for receiver
+		closeParen := strings.Index(line, ") ")
+		if closeParen != -1 {
+			// Skip the receiver part: ") FunctionName("
+			line = strings.TrimSpace(line[closeParen+2:])
+		}
+	}
+
+	// Now we should have: FunctionName(params...)
+	// Find the opening parenthesis
+	parenIndex := strings.Index(line, "(")
+	if parenIndex == -1 {
+		return ""
+	}
+
+	// Extract function name (everything before the '(')
+	funcName := strings.TrimSpace(line[:parenIndex])
+
+	// Remove any remaining special characters
+	funcName = strings.Trim(funcName, " \t*&[]")
+
+	return funcName
 }
 
 // parseDiffLine parses a single line from the diff
@@ -158,17 +238,17 @@ func parseDiffLine(line, currentFunction string) *DiffChange {
 	if len(line) == 0 {
 		return nil
 	}
-	
+
 	change := &DiffChange{
 		Function: currentFunction,
 	}
-	
+
 	switch line[0] {
 	case '+':
 		change.Type = Added
 		change.Line = line[1:]
 	case '-':
-		change.Type = Removed  
+		change.Type = Removed
 		change.Line = line[1:]
 	case ' ':
 		change.Type = Context
@@ -176,27 +256,8 @@ func parseDiffLine(line, currentFunction string) *DiffChange {
 	default:
 		return nil // Skip unrecognized lines
 	}
-	
-	return change
-}
 
-// GetModifiedFunctions returns functions that have actual code changes (not just context)
-func (fd *FileDiff) GetModifiedFunctions() []string {
-	functionSet := make(map[string]bool)
-	
-	for _, change := range fd.Changes {
-		if change.Type == Added || change.Type == Removed {
-			if change.Function != "" {
-				functionSet[change.Function] = true
-			}
-		}
-	}
-	
-	var functions []string
-	for fn := range functionSet {
-		functions = append(functions, fn)
-	}
-	return functions
+	return change
 }
 
 // FilterGoFiles filters the diff to only include Go files
@@ -208,4 +269,9 @@ func (dr *DiffResult) FilterGoFiles() *DiffResult {
 		}
 	}
 	return filtered
+}
+
+// ParseDiff is the exported version of parseDiff
+func ParseDiff(diffText string) (*DiffResult, error) {
+	return parseDiff(diffText)
 }

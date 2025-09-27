@@ -206,10 +206,14 @@ func shouldGenerateTest(fn models.FunctionInfo) bool {
 
 // isTestFunction checks if function name indicates it's a test
 func isTestFunction(name string) bool {
-	return len(name) > 4 && (name[:4] == "Test" ||
-		name[:9] == "Benchmark" ||
-		name[:7] == "Example" ||
-		name[:4] == "Fuzz")
+	if len(name) < 5 { // Need at least "TestX" (5 chars)
+		return false
+	}
+
+	return name[:4] == "Test" ||
+		(len(name) >= 9 && name[:9] == "Benchmark") ||
+		(len(name) >= 7 && name[:7] == "Example") ||
+		(len(name) >= 4 && name[:4] == "Fuzz")
 }
 
 // isExported checks if function is exported (starts with capital letter)

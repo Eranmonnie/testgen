@@ -1,37 +1,5 @@
 package models
 
-// Config represents the testgen configuration
-type Config struct {
-	Mode     string        `yaml:"mode"`  // "auto" or "manual"
-	Hooks    []string      `yaml:"hooks"` // git hooks to install
-	Triggers TriggerConfig `yaml:"triggers"`
-	AI       AIConfig      `yaml:"ai"`
-	Output   OutputConfig  `yaml:"output"`
-}
-
-// TriggerConfig defines when test generation should trigger
-type TriggerConfig struct {
-	Auto   []string `yaml:"auto"` // file patterns for auto mode
-	Manual struct {
-		DefaultRange string `yaml:"default_range"`
-	} `yaml:"manual"`
-}
-
-// AIConfig defines AI model settings
-type AIConfig struct {
-	Model       string  `yaml:"model"`       // "gpt-4", "gpt-3.5-turbo", etc.
-	Temperature float64 `yaml:"temperature"` // creativity level
-	MaxTokens   int     `yaml:"max_tokens"`  // response length limit
-	APIKey      string  `yaml:"api_key"`     // or use env var
-}
-
-// OutputConfig defines where and how tests are generated
-type OutputConfig struct {
-	Directory string `yaml:"directory"` // where to put test files
-	Suffix    string `yaml:"suffix"`    // test file suffix, default "_test.go"
-	Overwrite bool   `yaml:"overwrite"` // overwrite existing tests
-}
-
 // FunctionInfo represents a Go function to generate tests for
 type FunctionInfo struct {
 	Name       string          `json:"name"`

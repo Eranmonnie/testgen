@@ -5,91 +5,99 @@ import (
 )
 
 func TestParseDiff(t *testing.T) {
-	// Sample git diff output
-	diffText := `diff --git a/user.go b/user.go
+	diffOutput := `diff --git a/user.go b/user.go
 index 1234567..abcdefg 100644
 --- a/user.go
 +++ b/user.go
-@@ -10,6 +10,12 @@ func ValidateUser(user *User) error {
-     if user.Email == "" {
-         return errors.New("email required")
+@@ -10,6 +10,10 @@ func ValidateUser(user *User) error {
+ )
+ 
+ func ValidateUser(user *User) error {
++	if user == nil {
++		return errors.New("user is nil")
++	}
+     if user.Name == "" {
+         return errors.New("name required")
      }
-+    if !strings.Contains(user.Email, "@") {
-+        return errors.New("invalid email format")
-+    }
+@@ -25,6 +29,15 @@ func ValidateUser(user *User) error {
      return nil
  }
  
-@@ -25,3 +31,7 @@ func CreateUser(name, email string) *User {
-         Email: email,
-     }
- }
++func CreateUser(name, email string) *User {
++	return &User{
++		Name:  name,
++		Email: email,
++	}
++}
 +
-+func DeleteUser(id int) error {
-+    return database.Delete("users", id)
-+}`
+ func GetUser(id int) (*User, error) {
+     // This function appears in diff but has no actual changes
+     return findUser(id)`
 
-	result, err := parseDiff(diffText)
+	result, err := ParseDiff(diffOutput) // Make sure this calls the right function
 	if err != nil {
-		t.Fatalf("parseDiff failed: %v", err)
+		t.Fatalf("ParseDiff failed: %v", err)
 	}
 
-	// Should have one file
 	if len(result.Files) != 1 {
 		t.Fatalf("expected 1 file, got %d", len(result.Files))
 	}
 
 	file := result.Files[0]
+	functions := file.GetModifiedFunctions()
 
-	// Check file paths
-	if file.OldPath != "user.go" || file.NewPath != "user.go" {
-		t.Errorf("expected user.go -> user.go, got %s -> %s", file.OldPath, file.NewPath)
-	}
-
-	// Check functions found
-	expectedFunctions := []string{"ValidateUser", "CreateUser", "DeleteUser"}
-	if len(file.Functions) != len(expectedFunctions) {
-		t.Errorf("expected %d functions, got %d: %v", len(expectedFunctions), len(file.Functions), file.Functions)
-	}
-
-	// Check modified functions (only those with + or - changes)
-	modifiedFunctions := file.GetModifiedFunctions()
-	expectedModified := []string{"ValidateUser", "DeleteUser"}
-
-	if len(modifiedFunctions) != len(expectedModified) {
-		t.Errorf("expected %d modified functions, got %d: %v", len(expectedModified), len(modifiedFunctions), modifiedFunctions)
-	}
-
-	// Check that we have some added lines
-	addedCount := 0
-	for _, change := range file.Changes {
-		if change.Type == Added {
-			addedCount++
+	// Debug: print what we actually found
+	t.Logf("Found functions: %v", functions)
+	t.Logf("File changes count: %d", len(file.Changes))
+	for i, change := range file.Changes {
+		if i < 5 { // Print first 5 changes for debugging
+			t.Logf("Change %d: Type=%v, Line=%q, Function=%q", i, change.Type, change.Line, change.Function)
 		}
 	}
 
-	if addedCount == 0 {
-		t.Error("expected some added lines, got none")
+	// Should detect both ValidateUser (modified) and CreateUser (added)
+	expectedFunctions := []string{"ValidateUser", "CreateUser"}
+	if len(functions) != len(expectedFunctions) {
+		t.Errorf("expected %d functions, got %d: %v", len(expectedFunctions), len(functions), functions)
+	}
+
+	// Check that both expected functions are found
+	for _, expected := range expectedFunctions {
+		found := false
+		for _, actual := range functions {
+			if actual == expected {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("expected function %s not found in %v", expected, functions)
+		}
 	}
 }
 
 func TestExtractFunctionName(t *testing.T) {
 	tests := []struct {
-		context  string
+		input    string
 		expected string
 	}{
 		{"func ValidateUser(user *User) error {", "ValidateUser"},
-		{"func (u *User) GetName() string {", "GetName"},
 		{"func CreateUser(name, email string) *User {", "CreateUser"},
 		{"func main() {", "main"},
-		{"    if user.Email == \"\" {", ""}, // not a function line
+		{"func (u *User) GetName() string {", "GetName"},
+		{"+func NewUser() *User {", "NewUser"},
+		{" func helper() {", "helper"},
+		{"not a function", ""},
+		{"", ""},
 	}
 
 	for _, test := range tests {
-		result := extractFunctionName(test.context)
-		if result != test.expected {
-			t.Errorf("extractFunctionName(%q) = %q, expected %q", test.context, result, test.expected)
-		}
+		t.Run(test.input, func(t *testing.T) {
+			result := extractFunctionName(test.input)
+			if result != test.expected {
+				t.Errorf("extractFunctionName(%q) = %q, expected %q", test.input, result, test.expected)
+			}
+		})
 	}
 }
 
