@@ -268,7 +268,7 @@ func validateConfig(config *Config) error {
 	}
 
 	// Validate AI provider
-	validProviders := []string{"openai", "anthropic", "local"}
+	validProviders := []string{"openai", "anthropic", "groq", "local"}
 	if !contains(validProviders, config.AI.Provider) {
 		return fmt.Errorf("unsupported AI provider '%s', must be one of: %s",
 			config.AI.Provider, strings.Join(validProviders, ", "))

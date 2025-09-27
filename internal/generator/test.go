@@ -40,6 +40,8 @@ func (tg *TestGenerator) GenerateTests(request models.TestGenerationRequest) (*m
 		return tg.generateWithAnthropic(request)
 	case "local":
 		return tg.generateWithLocal(request)
+	case "groq":
+		return tg.generateWithGroq(request)
 	default:
 		return nil, fmt.Errorf("unsupported AI provider: %s", tg.config.AI.Provider)
 	}
@@ -131,12 +133,41 @@ func (tg *TestGenerator) generateWithLocal(request models.TestGenerationRequest)
 	return nil, fmt.Errorf("local AI provider not implemented yet")
 }
 
+// Add Groq provider
+func (tg *TestGenerator) generateWithGroq(request models.TestGenerationRequest) (*models.TestGenerationResponse, error) {
+	if tg.config.AI.APIKey == "" {
+		return nil, fmt.Errorf("Groq API key not configured")
+	}
+
+	prompt := tg.buildPrompt(request)
+
+	// Groq API request (OpenAI-compatible)
+	groqRequest := map[string]interface{}{
+		"model": tg.config.AI.Model, // e.g., "llama3-8b-8192"
+		"messages": []map[string]string{
+			{
+				"role":    "system",
+				"content": "You are an expert Go test writer. Generate comprehensive, idiomatic Go tests.",
+			},
+			{
+				"role":    "user",
+				"content": prompt,
+			},
+		},
+		"temperature": tg.config.AI.Temperature,
+		"max_tokens":  tg.config.AI.MaxTokens,
+	}
+
+	return tg.makeAPIRequest("https://api.groq.com/openai/v1/chat/completions", groqRequest, "Authorization", "Bearer "+tg.config.AI.APIKey)
+}
+
+// filepath: [test.go](http://_vscodecontentref_/0)
 // buildPrompt creates the AI prompt from the request
 func (tg *TestGenerator) buildPrompt(request models.TestGenerationRequest) string {
 	var prompt strings.Builder
 
 	prompt.WriteString("Generate comprehensive Go tests for the following functions. ")
-	prompt.WriteString("Return the response as a valid JSON object with the structure specified.\n\n")
+	prompt.WriteString("You must return ONLY a valid JSON object with no markdown formatting, no code blocks, and no backticks.\n\n")
 
 	// Add context information
 	prompt.WriteString("Project Context:\n")
@@ -218,22 +249,9 @@ func (tg *TestGenerator) buildPrompt(request models.TestGenerationRequest) strin
 	prompt.WriteString("7. Test nil pointer cases if function uses pointers\n")
 	prompt.WriteString("8. Are readable and well-commented\n\n")
 
-	// Specify response format
-	prompt.WriteString("Response format (JSON):\n")
-	prompt.WriteString(`{
-  "tests": [
-    {
-      "name": "TestFunctionName_Scenario",
-      "code": "complete test function code",
-      "description": "what this test validates",
-      "test_type": "unit",
-      "coverage": ["scenario1", "scenario2"]
-    }
-  ],
-  "reasoning": "explanation of testing approach",
-  "confidence": 0.85,
-  "warnings": ["any potential issues or limitations"]
-}`)
+	// Specify response format more clearly
+	prompt.WriteString("IMPORTANT: Return only valid JSON in this exact format (no markdown, no code blocks, no backticks):\n")
+	prompt.WriteString(`{"tests":[{"name":"TestFunctionName_Scenario","code":"func TestFunctionName_Scenario(t *testing.T) { /* test code */ }","description":"what this test validates","test_type":"unit","coverage":["scenario1","scenario2"]}],"reasoning":"explanation of testing approach","confidence":0.85,"warnings":["any potential issues"]}`)
 
 	return prompt.String()
 }
@@ -287,8 +305,8 @@ func (tg *TestGenerator) makeAPIRequest(url string, requestData map[string]inter
 
 // parseAPIResponse parses AI API response into our format
 func (tg *TestGenerator) parseAPIResponse(body []byte, url string) (*models.TestGenerationResponse, error) {
-	if strings.Contains(url, "openai.com") {
-		return tg.parseOpenAIResponse(body)
+	if strings.Contains(url, "openai.com") || strings.Contains(url, "groq.com") {
+		return tg.parseOpenAIResponse(body) // Groq uses OpenAI-compatible format
 	} else if strings.Contains(url, "anthropic.com") {
 		return tg.parseAnthropicResponse(body)
 	}
@@ -317,9 +335,15 @@ func (tg *TestGenerator) parseOpenAIResponse(body []byte) (*models.TestGeneratio
 		return nil, fmt.Errorf("no choices in OpenAI response")
 	}
 
+	// Clean the content - remove markdown code blocks if present
+	content := openAIResp.Choices[0].Message.Content
+	content = tg.cleanJSONResponse(content)
+
 	// Parse the JSON content
 	var response models.TestGenerationResponse
-	if err := json.Unmarshal([]byte(openAIResp.Choices[0].Message.Content), &response); err != nil {
+	if err := json.Unmarshal([]byte(content), &response); err != nil {
+		// Log the actual content for debugging
+		fmt.Printf("DEBUG: Failed to parse JSON. Content: %s\n", content)
 		return nil, fmt.Errorf("failed to parse test generation response: %w", err)
 	}
 
@@ -346,13 +370,46 @@ func (tg *TestGenerator) parseAnthropicResponse(body []byte) (*models.TestGenera
 		return nil, fmt.Errorf("no content in Anthropic response")
 	}
 
+	// Clean the content - remove markdown code blocks if present
+	content := anthropicResp.Content[0].Text
+	content = tg.cleanJSONResponse(content)
+
 	// Parse the JSON content
 	var response models.TestGenerationResponse
-	if err := json.Unmarshal([]byte(anthropicResp.Content[0].Text), &response); err != nil {
+	if err := json.Unmarshal([]byte(content), &response); err != nil {
+		// Log the actual content for debugging
+		fmt.Printf("DEBUG: Failed to parse JSON. Content: %s\n", content)
 		return nil, fmt.Errorf("failed to parse test generation response: %w", err)
 	}
 
 	return &response, nil
+}
+
+// cleanJSONResponse removes markdown formatting from AI responses
+func (tg *TestGenerator) cleanJSONResponse(content string) string {
+	// Remove markdown code blocks
+	content = strings.TrimSpace(content)
+
+	// Remove ```json and ``` markers
+	if strings.HasPrefix(content, "```json") {
+		content = strings.TrimPrefix(content, "```json")
+	}
+	if strings.HasPrefix(content, "```") {
+		content = strings.TrimPrefix(content, "```")
+	}
+	if strings.HasSuffix(content, "```") {
+		content = strings.TrimSuffix(content, "```")
+	}
+
+	// Find the first { and last } to extract just the JSON
+	start := strings.Index(content, "{")
+	end := strings.LastIndex(content, "}")
+
+	if start != -1 && end != -1 && end > start {
+		content = content[start : end+1]
+	}
+
+	return strings.TrimSpace(content)
 }
 
 // writeTestFile writes tests to a file
