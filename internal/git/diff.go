@@ -38,6 +38,7 @@ const (
 	Context
 )
 
+// entry point
 // GetDiff gets the diff between two git references
 func GetDiff(from, to string) (*DiffResult, error) {
 	// Get the raw diff with function context
@@ -95,7 +96,7 @@ func parseDiff(diffText string) (*DiffResult, error) {
 	var lineNum int
 
 	// Regex patterns for parsing
-	fileHeaderRegex := regexp.MustCompile(`^diff --git a/(.*) b/(.*)$`)
+	fileHeaderRegex := regexp.MustCompile(`^diff --git a/(.*) b/(.*)$`) // file names
 	hunkHeaderRegex := regexp.MustCompile(`^@@ -(\d+),?(\d*) \+(\d+),?(\d*) @@ ?(.*)$`)
 
 	for scanner.Scan() {
@@ -157,7 +158,7 @@ func parseDiff(diffText string) (*DiffResult, error) {
 		}
 	}
 
-	// Don't forget the last file
+	// Don't forget the last file cuz we add the first file in the loop after it and so on yg
 	if currentFile != nil {
 		result.Files = append(result.Files, *currentFile)
 	}

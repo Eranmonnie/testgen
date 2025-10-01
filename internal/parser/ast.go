@@ -15,6 +15,7 @@ type FileAnalysis struct {
 	Imports     []ImportInfo
 	Functions   []FunctionInfo
 	Constants   map[string]string
+	Variables   map[string]string
 	Types       []TypeInfo
 }
 
@@ -386,10 +387,19 @@ func analyzeGenDecl(decl *ast.GenDecl, analysis *FileAnalysis) {
 				for i, name := range s.Names {
 					if len(s.Values) > i {
 						// Simplified constant value extraction
-						analysis.Constants[name.Name] = "const_value"
+						analysis.Constants[name.Name] = extractValue(s.Values[i])
+					}
+				}
+			} else if decl.Tok == token.VAR {
+				// add variable handling
+				for i, name := range s.Names {
+					if len(s.Values) > i {
+						// Simplified variable value extraction
+						analysis.Variables[name.Name] = extractValue(s.Values[i])
 					}
 				}
 			}
+
 		case *ast.TypeSpec:
 			// Type definitions
 			typeInfo := TypeInfo{
@@ -399,6 +409,15 @@ func analyzeGenDecl(decl *ast.GenDecl, analysis *FileAnalysis) {
 			analysis.Types = append(analysis.Types, typeInfo)
 		}
 	}
+}
+func extractValue(expr ast.Expr) string {
+	switch v := expr.(type) {
+	case *ast.BasicLit:
+		return v.Value
+	case *ast.Ident:
+		return v.Name
+	}
+	return "unknown"
 }
 
 // FilterFunctions filters functions by names (from git diff analysis)

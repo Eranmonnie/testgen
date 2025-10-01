@@ -104,7 +104,7 @@ func TestBuildPrompt(t *testing.T) {
 		t.Error("Expected prompt to have functions section")
 	}
 
-	if !strings.Contains(prompt, "Response format (JSON):") {
+	if !strings.Contains(prompt, "Response Format:") {
 		t.Error("Expected prompt to have response format section")
 	}
 }

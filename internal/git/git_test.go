@@ -16,25 +16,23 @@ index 1234567..abcdefg 100644
 +	if user == nil {
 +		return errors.New("user is nil")
 +	}
-     if user.Name == "" {
-         return errors.New("name required")
-     }
-@@ -25,6 +29,15 @@ func ValidateUser(user *User) error {
++	if user.Name == "" {
++		return errors.New("name required")
++	}
      return nil
  }
- 
++
 +func CreateUser(name, email string) *User {
 +	return &User{
 +		Name:  name,
 +		Email: email,
 +	}
 +}
-+
- func GetUser(id int) (*User, error) {
+@@ -30,7 +40,7 @@ func GetUser(id int) (*User, error) {
      // This function appears in diff but has no actual changes
-     return findUser(id)`
-
-	result, err := ParseDiff(diffOutput) // Make sure this calls the right function
+     return findUser(id)
+`
+	result, err := ParseDiff(diffOutput)
 	if err != nil {
 		t.Fatalf("ParseDiff failed: %v", err)
 	}
